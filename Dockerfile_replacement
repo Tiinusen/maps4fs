@@ -1,0 +1,20 @@
+FROM iwatkot/maps4fs:latest
+
+# Set the working directory
+WORKDIR /usr/src/app
+
+# Remove the existing maps4fs folder from the base image
+RUN rm -rf /usr/src/app/maps4fs
+
+# Replace the maps4fs map with the one from your repository
+COPY .streamlit /usr/src/app/.streamlit
+COPY data /usr/src/app/data
+COPY docs /usr/src/app/docs
+COPY webui /usr/src/app/webui
+COPY maps4fs /usr/src/app/maps4fs
+
+# Expose the default Streamlit port
+EXPOSE 8501
+
+# Set the command to run the application
+CMD ["streamlit", "run", "./webui/webui.py"]
