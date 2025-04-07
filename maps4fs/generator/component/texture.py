@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sys
 import warnings
 from collections import defaultdict
 from typing import Any, Callable, Generator, Optional
@@ -400,7 +401,7 @@ class Texture(ImageComponent):
         if tags is None:
             return
 
-        for polygon in self.objects_generator(tags, layer.width, layer.info_layer):
+        for polygon in self.objects_generator(tags, layer.width, layer.info_layer, exact_match_tag=self.map.texture_settings.use_precise_tags and layer.precise_tags):
             if not len(polygon) > 2:
                 self.logger.debug("Skipping polygon with less than 3 points.")
                 continue
@@ -654,6 +655,7 @@ class Texture(ImageComponent):
         width: int | None,
         info_layer: str | None = None,
         yield_linestrings: bool = False,
+        exact_match_tag: bool = False,
     ) -> Generator[np.ndarray, None, None] | Generator[list[tuple[int, int]], None, None]:
         """Generator which yields numpy arrays of polygons from OSM data.
 
@@ -662,6 +664,7 @@ class Texture(ImageComponent):
             width (int | None): Width of the polygon in meters (only for LineString).
             info_layer (str | None): Name of the corresponding info layer.
             yield_linestrings (bool): Flag to determine if the LineStrings should be yielded.
+            exact_match_tag (bool): Flag to determine if the tags should be matched exactly.
 
         Yields:
             Generator[np.ndarray, None, None] | Generator[list[tuple[int, int]], None, None]:
@@ -687,11 +690,12 @@ class Texture(ImageComponent):
         self.logger.debug("Fetched %s elements for tags: %s.", len(objects), tags)
 
         method = self.linestrings_generator if yield_linestrings else self.polygons_generator
-
-        yield from method(objects, width, is_fieds)
+        if not exact_match_tag:
+            tags = None
+        yield from method(objects, tags, width, is_fieds)
 
     def linestrings_generator(
-        self, objects: pd.core.frame.DataFrame, *args, **kwargs
+        self, objects: pd.core.frame.DataFrame, tags: dict[str, str | list[str] | bool] | None, *args, **kwargs
     ) -> Generator[list[tuple[int, int]], None, None]:
         """Generator which yields lists of point coordinates which represent LineStrings from OSM.
 
@@ -703,12 +707,15 @@ class Texture(ImageComponent):
         """
         for _, obj in objects.iterrows():
             geometry = obj["geometry"]
+            if tags is not None:
+                if not all(tag in obj.index and obj[tag] == value for tag, value in tags.items()):
+                    continue
             if isinstance(geometry, LineString):
                 points = [self.latlon_to_pixel(x, y) for y, x in geometry.coords]
                 yield points
 
     def polygons_generator(
-        self, objects: pd.core.frame.DataFrame, width: int | None, is_fieds: bool
+        self, objects: pd.core.frame.DataFrame, tags: dict[str, str | list[str] | bool] | None, width: int | None, is_fieds: bool
     ) -> Generator[np.ndarray, None, None]:
         """Generator which yields numpy arrays of polygons from OSM data.
 
@@ -721,6 +728,9 @@ class Texture(ImageComponent):
             Generator[np.ndarray, None, None]: Numpy array of polygon points.
         """
         for _, obj in objects.iterrows():
+            if tags is not None:
+                if not all(tag in obj.index and obj[tag] == value for tag, value in tags.items()):
+                    continue
             try:
                 polygon = self._to_polygon(obj, width)
             except Exception as e:
